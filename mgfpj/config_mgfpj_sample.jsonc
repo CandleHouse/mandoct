@@ -1,0 +1,90 @@
+// This is a config sample for mgfpj
+
+{
+  /*********************************************************
+	* input and output directory and files
+	*********************************************************/
+  "InputDir": ".",
+  "OutputDir": ".",
+
+  // all the files in the input directory, use regular expression
+  "InputFiles": "img_.*.raw",
+  // output file name (prefix, replace)
+  "OutputFilePrefix": "test_",
+  // replace substring in input file name
+  "OutputFileReplace": [ "img_", "sgm_" ],
+  /*************************************
+  Linked Input files
+  ************************************/
+  // (optional) scan angle file for nonuniform scan angles
+  // the previous TotalScanAngle term will be null if this term is uncommented
+  // the unit of the scan angles is degree
+  // the number of angles should be consistent with the Views
+  // check the sample file for more info
+  "ScanAngleFile":  "scan_angle_file_sample.jsonc",
+  // (OPTIONAL; for nonuniform SID)
+  "SIDFile": "sid_file_sample.jsonc",
+  // (OPTIONAL; for nonuniform SDD)
+  "SDDFile": "sdd_file_sample.jsonc",
+  // (OPTIONAL; for nonuzero Swing Angle)
+  "SwingAngleFile":"xxx",
+  // (OPTIONAL; file detector offcenter array)
+  "DetectorOffCenterFile": "offcenter_file_sample",
+
+
+  /*********************************************************
+	* image parameters
+	*********************************************************/
+
+  // image dimension (integer)
+  "ImageDimension": 512,
+
+  /* pixel size or image size, just use one of them */
+  // image pixel size [mm]
+  "PixelSize": 0.43,
+  // image size [mm]
+  //"ImageSize": 200,
+
+  // number of slices in each image file
+  "SliceCount": 1,
+
+  // (OPTIONAL) Whether the cone beam recon is needed
+  // in case of "false", all other items related to cone beam recon will be null
+  "ConeBeam": false,
+  // (OPTIONAL; for cone beam) image slice thickness [mm]
+  "ImageSliceThickness": 0.43,
+
+  /*********************************************************
+	* geometry and detector parameters
+	*********************************************************/
+
+  // source to isocenter distance [mm]
+  "SourceIsocenterDistance": 539,
+  // source to detector distance [mm]
+  "SourceDetectorDistance": 949,
+
+
+  // start angle (positive counterclockwise) [degree]
+  "StartAngle": 90,
+  // number of detector elements
+  "DetectorElementCount": 854,
+  // number of views for reconstruction
+  "Views": 1501,
+  // (optional) total scan angle for short scan. Set scan angle to negtive to change rotation direction
+  "TotalScanAngle": 300,
+  // (OPTIONAL; for cone beam) detector Z elemtment count
+  "DetectorZElementCount": 6,
+
+  // the physical size of detector element size [mm]
+  "DetectorElementSize": 0.7,
+  // the position (coordinate) of detector center [mm]
+  "DetectorOffcenter": 35,
+
+  // (OPTIONAL; for cone beam) detector elemtment height [mm]
+  "DetectorElementHeight": 0.8,
+  // (OPTIONAL; for cone beam) detector elemtment height [mm]
+  "DetectorZOffcenter": 0,
+
+  // oversample sinogram by increasing the number of detector elements by the factor of number below
+  "OversampleSize": 2
+}
