@@ -1,3 +1,6 @@
-[submodule "rapidjson"]
-	path = rapidjson
+[submodule "thirdparty/rapidjson"]
+	path = thirdparty/rapidjson
 	url = git@github.com:Tencent/rapidjson.git
+[submodule "thirdparty/TinyTIFF"]
+	path = thirdparty/TinyTIFF
+	url = git@github.com:jkriege2/TinyTIFF.git
