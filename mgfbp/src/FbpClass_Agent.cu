@@ -264,7 +264,7 @@ __global__ void WeightSinogram_device(float* sgm, int s_index, const float* u, c
 		float u_actual = u[col] + offcenter_bias;//actual u value due to non uniform offcenter
 
 		float sdd = sdd_array[row];
-		for (int i = s_index * S / 16; i < (s_index+1) * S / 16; i++)
+		for (int i = s_index; i < s_index+1; i++)
 		{
 			float v = sliceThickness * (i - (float(S) / 2.0f + 0.5)) + sliceOffcenter;
             sgm[row*N + col + i * N*H] *= sdd * sdd / sqrtf((u_actual)*(u_actual)+sdd * sdd + v * v);
@@ -306,7 +306,7 @@ __global__ void WeightSinogram_device(float* sgm, int s_index, const float* u, c
 			{
 				//printf("ERROR!");
 			}
-            for (int i = s_index * S / 16; i < (s_index+1) * S / 16; i++)
+            for (int i = s_index; i < s_index+1; i++)
 			{
                 sgm[row*N + col + i * N*H] *= weighting;
 			}
@@ -1137,7 +1137,8 @@ void FilterSinogram_Agent(float * sgm, float* sgm_flt, float* reconKernel, float
     // Common attenuation imaging
     else
     {
-        const int nStreams = 16;
+        // nStreams must be the GCD(volumes, slice)'s divisor
+        const int nStreams = config.sliceCount;
         cudaStream_t streams[nStreams];
         for (auto & stream : streams)
             checkCuda(cudaStreamCreate(&stream));
