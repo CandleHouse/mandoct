@@ -21,6 +21,8 @@ void InitializeNonuniformOffCenter_Agent(float* &offcenter_array, const int V, c
 
 void InitializeNonuniformPara_Agent(float* &para_array, const int V, const std::string& paraFile);
 
+void InitializePMatrix_Agent(float* &pmatrix_array, const int V, const std::string& pmatrixFile);
+
 // Initialize u, the array of each detector element coordiante
 // u: array of detector elements
 // N: number of detector elements
@@ -41,8 +43,12 @@ void InitializeBeta_Agent(float* &beta, const int V, const float startAngle, con
 void InitializeNonuniformBeta_Agent(float* &beta, const int V, const float rotation, const std::string& scanAngleFile);
 
 // Forward projection, using bilinear interpolation
+//void ForwardProjectionBilinear_Agent(float* &image, float* &sinogram, const float* sid_array, const float* sdd_array, const float* offcenter_array,\
+//	const float* u,const float* v, const float* beta, const float* swing_angle_array, const mango::Config& config, int z_element_idx);
+
+// Forward projection, using bilinear interpolation and pMatrix
 void ForwardProjectionBilinear_Agent(float* &image, float* &sinogram, const float* sid_array, const float* sdd_array, const float* offcenter_array,\
-	const float* u,const float* v, const float* beta, const float* swing_angle_array, const mango::Config& config, int z_element_idx);
+	const float* pmatrix_array, const float* u,const float* v, const float* beta, const float* swing_angle_array, const mango::Config& config, int z_element_idx);
 
 // Bin the sinogram data along detector direction
 void BinSinogram(float* &sinogram_large, float* &sinogram, const mango::Config& config);

@@ -32,6 +32,44 @@ __global__ void InitBeta(float* beta, const int V, const float startAngle, const
 	}
 }
 
+__global__ void PMatrixInv3_device(float *pmatrix)
+{
+    __shared__ float PMatrixInv3[9];
+
+    int isx = threadIdx.x;
+    int isy = threadIdx.y;
+    float tmpIn;
+    float tmpInv;
+    // initialize E
+    if(isx == isy)
+        PMatrixInv3[isy*3 + isx] = 1;
+    else
+        PMatrixInv3[isy*3 + isx] = 0;
+
+    // Gaussian elimination method for matrix inverse
+    for (int i = 0; i < 3; i++)
+    {
+        if (i == isy && isx < 3 && isy < 3)
+        {
+            // The main diagonal element is reduced to 1
+            tmpIn = pmatrix[i*3 + i];
+            pmatrix[i*3 + isx] /= tmpIn;
+            PMatrixInv3[i*3 + isx] /= tmpIn;
+        }
+        __syncthreads();
+        if (i != isy && isx < 3 && isy < 3)
+        {
+            // Reduce the element in the pivot column to 0, and the element in the row changes simultaneously
+            tmpInv = pmatrix[isy*3 + i];
+            pmatrix[isy*3 + isx] -= tmpInv * pmatrix[i*3 + isx];
+            PMatrixInv3[isy*3 + isx] -= tmpInv * PMatrixInv3[i*3 + isx];
+        }
+        __syncthreads();
+    }
+
+    pmatrix[isy*3 + isx] = PMatrixInv3[isy*3 + isx];
+}
+
 // img: image data
 // sgm: sinogram data
 // u: array of each detector element position
@@ -208,6 +246,189 @@ __global__ void ForwardProjectionBilinear_device(float* img, float* sgm, const f
 
 		}
 	}
+}
+
+// img: image data
+// sgm: sinogram data
+// u: array of each detector element position
+// beta: array of each view angle [radian]
+// M: image dimension
+// S: number of image slices
+// N_z: number of detector elements in Z direction
+// N: number of detector elements (sinogram width)
+// V: number of views (sinogram height)
+// dx: image pixel size [mm]
+// dz: image slice thickness [mm]
+// sid: source to isocenter distance
+// sdd: source to detector distance
+__global__ void ForwardProjectionBilinear_pmatrix_device(float* img, float* sgm, const float* u, const float *v, const float* pmatrix, const float* beta, const float* swing_angle_array, int M, int S,\
+	int N, int N_z, int V, float dx, float dz,  const float* sid_array, const float* sdd_array, bool conebeam, bool helican_scan, float helical_pitch,\
+	int z_element_begin_idx, int z_element_end_idx, int osSize)
+{
+    int col = threadIdx.x + blockDim.x * blockIdx.x;//column is direction of elements
+    int row = threadIdx.y + blockDim.y * blockIdx.y;//row is direction of views
+    //function is parallelly run for each element in each view
+
+    if (col < N && row < V && z_element_end_idx <= N_z)
+    {
+        // half of image side length
+        float D = float(M)  * dx / 2.0f;
+        // half of image thickness
+        float D_z = 0.0f;
+        if (conebeam)
+        {
+            D_z = float(S) * dz / 2.0f;
+        }
+        else
+        {
+            dz = 0;
+        }
+
+
+        //get the sid and sdd for a given view
+        float sid = sid_array[row];
+        float sdd = sdd_array[row];
+
+        // current source position
+        float xs = sid * cosf(beta[row]);
+        float ys = sid * sinf(beta[row]);
+        float zs = 0;
+
+        // calculate offcenter bias
+        float offcenter_bias = 0;
+
+        // current detector element position
+        float xd = -(sdd - sid) * cosf(beta[row]) + (u[col]+ offcenter_bias) * cosf(beta[row] - PI/2.0f + swing_angle_array[row] /180.0f*PI);
+        float yd = -(sdd - sid) * sinf(beta[row]) + (u[col]+ offcenter_bias) * sinf(beta[row] - PI/2.0f + swing_angle_array[row] / 180.0f*PI);
+        float zd = 0;
+
+        // step point region
+        float L_min = sid - sqrt(2 * D * D + D_z * D_z);
+        float L_max = sid + sqrt(2 * D * D + D_z * D_z);
+
+        // source to detector element distance
+        float sed = sqrtf((xs - xd)*(xs - xd) + (ys - yd)*(ys - yd));// for fan beam case
+
+        // the point position
+        float x, y, z;
+        // the point index
+        int kx, ky, kz;
+        // weighting factor for linear interpolation
+        float wx, wy, wz;
+
+        // the most upper left image pixel position
+        float x0 = -D + dx / 2.0f;
+        float y0 = D - dx / 2.0f;
+        float z0 = 0;
+        if (conebeam)
+        {
+            z0 = -D_z + dz / 2.0f;// first slice is at the bottom, coordinate is -D_z +dz/2
+            // last slice is at the top, coordinate is D_z -dz/2
+        }
+
+        float z_dis_per_view = 0;
+        if (helican_scan)// for helical scan, we need to calculate the distance of the movement along the z direction between views
+        {
+            float total_scan_angle = abs((beta[V - 1] - beta[0])) / float(V - 1)*float(V);
+            float num_laps = total_scan_angle / (PI *2);
+            z_dis_per_view = helical_pitch * (num_laps / V) * (abs(v[1]-v[0])*N_z) / (sdd / sid);
+            //distance moved per view is pitch * lap per view * detector height / magnification
+
+        }
+
+        // repeat for each slice
+        for (int slice = z_element_begin_idx; slice < z_element_end_idx; slice++)
+        {
+            // initialization
+            //sgm[row*N + col + N * V * slice] = 0;
+            sgm[row*N + col] = 0;
+            if (conebeam)
+            {
+                zd = v[slice];
+                sed = sqrtf((xs - xd)*(xs - xd) + (ys - yd)*(ys - yd) + (zs - zd)*(zs - zd));
+            }
+
+            // calculate line integration
+            for (float L = L_min; L <= L_max; L+= STEPSIZE*sqrt(dx*dx+dz*dz/2.0f))
+                // for (float L = L_min; L <= L_max; L+= STEPSIZE*dx)  // <=
+            {
+                // ratio of [distance: current position to source] to [distance: source to element]
+                float s = L / sed;  // s=1/m
+
+                // use pmatrix to calculate the corresponding index in the object
+                int pos_in_matrix = 12 * row;
+                float p_14 = pmatrix[pos_in_matrix + 3];
+                float p_24 = pmatrix[pos_in_matrix + 7];
+                float p_34 = pmatrix[pos_in_matrix + 11];
+
+                // get the current point position
+                x = pmatrix[pos_in_matrix + 0] * (s * col / osSize - p_14) \
+                  + pmatrix[pos_in_matrix + 1] * (s * slice - p_24) \
+                  + pmatrix[pos_in_matrix + 2] * (s - p_34);
+
+                y = pmatrix[pos_in_matrix + 4] * (s * col / osSize - p_14) \
+                  + pmatrix[pos_in_matrix + 5] * (s * slice - p_24) \
+                  + pmatrix[pos_in_matrix + 6] * (s - p_34);
+
+                if (conebeam)// for cone beam, we need to calculate the z position
+                {
+                    z = pmatrix[pos_in_matrix + 8] * (s * col / osSize - p_14) \
+                      + pmatrix[pos_in_matrix + 9] * (s * slice - p_24) \
+                      + pmatrix[pos_in_matrix + 10]* (s - p_34);
+                }
+
+                if (helican_scan)
+                {
+                    z = z + z0 + row * z_dis_per_view;
+                    //for helical scan, if the image object is treated as stationary, both the detector and the source should move upward
+                }
+
+                // get the current point index
+                kx = floorf((x - x0) / dx);
+                ky = floorf((y0 - y) / dx);
+
+                if (conebeam)
+                    kz = floorf((z - z0) / dz);
+                // kz = roundf((z - z0) / dz);// floorf((z - z0) / dz);  // <=
+
+                // get the image pixel value at the current point
+                if(kx>=0 && kx+1<M && ky>=0 && ky+1<M)
+                {
+                    // get the weighting factor
+                    wx = (x - kx * dx - x0) / dx;
+                    wy = (y0 - y - ky * dx) / dx;
+
+                    // perform bilinear interpolation
+                    if (conebeam == false)
+                    {
+                        sgm[row*N + col] += (1 - wx)*(1 - wy)*img[ky*M + kx + M * M*slice] // upper left
+                                            + wx * (1 - wy) * img[ky*M + kx + 1 + M * M*slice] // upper right
+                                            + (1 - wx) * wy * img[(ky + 1)*M + kx + M * M*slice] // bottom left
+                                            + wx * wy * img[(ky + 1)*M + kx + 1 + M * M*slice];	// bottom right
+                    }
+                    else if (conebeam == true && kz >= 0 && kz + 1 < S)
+                    {
+
+                        wz = (z - kz * dz - z0) / dz;
+                        float sgm_val_lowerslice = (1 - wx)*(1 - wy)*img[ky*M + kx + M * M*kz] // upper left
+                                                   + wx * (1 - wy) * img[ky*M + kx + 1 + M * M*kz] // upper right
+                                                   + (1 - wx) * wy * img[(ky + 1)*M + kx + M * M*kz] // bottom left
+                                                   + wx * wy * img[(ky + 1)*M + kx + 1 + M * M*kz];	// bottom right
+                        float sgm_val_upperslice = (1 - wx)*(1 - wy)*img[ky*M + kx + M * M*(kz+1)] // upper left
+                                                   + wx * (1 - wy) * img[ky*M + kx + 1 + M * M*(kz + 1)] // upper right
+                                                   + (1 - wx) * wy * img[(ky + 1)*M + kx + M * M*(kz + 1)] // bottom left
+                                                   + wx * wy * img[(ky + 1)*M + kx + 1 + M * M*(kz + 1)];	// bottom right
+
+                        sgm[row*N + col] += (1 - wz)*sgm_val_lowerslice + wz * sgm_val_upperslice;
+
+                    }
+
+                }
+            }
+            sgm[row*N + col] *= STEPSIZE * sqrt(dx*dx + dz * dz/2.0f);
+
+        }
+    }
 }
 
 // sgm_large: sinogram data before binning
@@ -436,6 +657,83 @@ void InitializeNonuniformPara_Agent(float* &para_array, const int V, const std::
 	cudaDeviceSynchronize();
 }
 
+void InitializePMatrix_Agent(float* &pmatrix_array, const int V, const std::string& pmatrixFile)
+{
+    // namespace fs = std::filesystem;
+    namespace js = rapidjson;
+
+    if (pmatrix_array != nullptr)
+        cudaFree(pmatrix_array);
+
+    //cudaMallocManaged((void**)&pmatrix_array, 12 * V * sizeof(float));
+    cudaMalloc((void**)&pmatrix_array, 12 * V * sizeof(float));
+    //cudaMallocManaged somehow does not work for this function
+    //so cudaMalloc and cudaMemcpy is used
+
+
+    float* pmatrix_array_cpu = new float[12 * V];
+
+
+    std::ifstream ifs(pmatrixFile);
+    if (!ifs)
+    {
+        printf("\nCannot find pmatrix information file '%s'!\n", pmatrixFile.c_str());
+        exit(-2);
+    }
+    rapidjson::IStreamWrapper isw(ifs);
+    rapidjson::Document doc;
+    doc.ParseStream<js::kParseCommentsFlag | js::kParseTrailingCommasFlag>(isw);
+    js::Value pmatrix_jsonc_value;
+    if (doc.HasMember("PMatrix"))
+    {
+        pmatrix_jsonc_value = doc["PMatrix"];
+    }
+    else if(doc.HasMember("Value"))
+    {
+        pmatrix_jsonc_value = doc["Value"];
+    }
+    else
+    {
+        printf("\nDid not find PMatrix or Value member in jsonc file!\n");
+        exit(-2);
+    }
+    if (pmatrix_jsonc_value.Size() != 12 * V)
+    {
+        printf("\nNumber of pmatrix elements is %d while the 12 times number of Views is %d!\n", pmatrix_jsonc_value.Size(), 12 * V);
+        exit(-2);
+    }
+
+    for (unsigned i = 0; i < 12 * V; i++)
+    {
+        //printf("\n%d: %f",i, pmatrix_jsonc_value[i].GetFloat());
+        pmatrix_array_cpu[i] = pmatrix_jsonc_value[i].GetFloat();
+    }
+    cudaMemcpy(pmatrix_array, pmatrix_array_cpu, 12 * V * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaDeviceSynchronize();
+
+    // Inverse pMatrix for the first three dimensions
+    float* pmatrix = nullptr;
+    cudaMalloc((void**)&pmatrix, 9 * sizeof(float));
+    uint3 s;s.x = 3;s.y = 3;s.z = 1;
+
+    for (unsigned i = 0; i < V; i++)
+    {
+        // Inverse pMatrix for the first three dimensions
+        cudaMemcpy(&pmatrix[0], &pmatrix_array[12*i + 0], 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(&pmatrix[3], &pmatrix_array[12*i + 4], 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(&pmatrix[6], &pmatrix_array[12*i + 8], 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+
+        PMatrixInv3_device <<<1, s>>>(pmatrix);
+
+        cudaMemcpy(&pmatrix_array[12*i + 0], &pmatrix[0], 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(&pmatrix_array[12*i + 4], &pmatrix[3], 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(&pmatrix_array[12*i + 8], &pmatrix[6], 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+
+    }
+    cudaFree(pmatrix);
+}
+
 void InitializeU_Agent(float* &u, const int N, const float du, const float offcenter)
 {
 	if (u != nullptr)
@@ -503,14 +801,23 @@ void InitializeNonuniformBeta_Agent(float* &beta, const int V, const float rotat
 }
 
 void ForwardProjectionBilinear_Agent(float *& image, float * &sinogram, const float* sid_array, const float* sdd_array, const float* offcenter_array,\
-	const float* u, const float *v, const float* beta, const float* swing_angle_array, const mango::Config & config, int z_element_idx)
+	const float* pmatrix_array, const float* u, const float *v, const float* beta, const float* swing_angle_array, const mango::Config & config, int z_element_idx)
 {
 	dim3 grid((config.detEltCount*config.oversampleSize + 7) / 8, (config.views + 7) / 8);
 	dim3 block(8, 8);
 
-	ForwardProjectionBilinear_device<<<grid, block>>>(image, sinogram, u, v, offcenter_array, beta, swing_angle_array, config.imgDim, config.sliceCount,\
+	if (config.pmatrixFlag == false)// if pmatrix is not applied
+    {
+        ForwardProjectionBilinear_device<<<grid, block>>>(image, sinogram, u, v, offcenter_array, beta, swing_angle_array, config.imgDim, config.sliceCount,\
 		config.detEltCount*config.oversampleSize, config.detZEltCount, config.views, config.pixelSize, config.sliceThickness,  sid_array, sdd_array, config.coneBeam, \
 		config.helicalScan, config.helicalPitch,  z_element_idx, z_element_idx+1);
+    }
+	else if (config.pmatrixFlag == true)// if pmatrix is applied
+    {
+        ForwardProjectionBilinear_pmatrix_device<<<grid, block>>>(image, sinogram, u, v, pmatrix_array, beta, swing_angle_array, config.imgDim, config.sliceCount,\
+		config.detEltCount*config.oversampleSize, config.detZEltCount, config.views, config.pixelSize, config.sliceThickness,  sid_array, sdd_array, config.coneBeam, \
+		config.helicalScan, config.helicalPitch,  z_element_idx, z_element_idx+1, config.oversampleSize);
+    }
 
 	cudaDeviceSynchronize();
 }

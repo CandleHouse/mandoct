@@ -6,6 +6,7 @@ mango::Config mango::FpjClass::config;
 float* mango::FpjClass::sdd_array = nullptr;
 float* mango::FpjClass::sid_array = nullptr;
 float* mango::FpjClass::offcenter_array = nullptr;
+float* mango::FpjClass::pmatrix_array = nullptr;
 float* mango::FpjClass::v = nullptr;
 float* mango::FpjClass::u = nullptr;
 float* mango::FpjClass::beta = nullptr;
@@ -163,6 +164,18 @@ void mango::FpjClass::ReadConfigFile(const char * filename)
 
 
 #pragma region  geometry and detector parameters
+    // for proj with pmatrix
+    if (doc.HasMember("PMatrixFile"))
+    {
+        printf("--pmatrix applied--\n");
+        config.pmatrixFlag = true;
+        config.pmatrixFile = doc["PMatrixFile"].GetString();
+    }
+    else
+    {
+        config.pmatrixFlag = false;
+    }
+
 	config.sid = doc["SourceIsocenterDistance"].GetFloat();
 
 	if (doc.HasMember("SIDFile"))
@@ -259,6 +272,16 @@ void mango::FpjClass::ReadConfigFile(const char * filename)
 	{
 		config.oversampleSize = doc["OversampleSize"].GetInt();
 	}
+
+    if (doc.HasMember("PmatrixDetectorElementSize"))
+    {
+        config.pmatrixDetEltSize = doc["PmatrixDetectorElementSize"].GetFloat();
+    }
+    else
+    {
+        config.pmatrixDetEltSize = config.detEltSize;
+    }
+
 #pragma endregion
 
 #pragma region cone beam parameters
@@ -360,6 +383,19 @@ void mango::FpjClass::InitParam()
 		InitializeDistance_Agent(swing_angle_array, 0.0f, config.views);
 	}
 
+    if (config.pmatrixFlag == true)
+    {
+        InitializePMatrix_Agent(pmatrix_array, config.views, config.pmatrixFile);
+
+//         print and validation
+//        float p[12 * config.views];
+//        cudaMemcpy(p, pmatrix_array, 12 * config.views * sizeof(float), cudaMemcpyDeviceToHost);
+//        for (unsigned i = 26 * 12; i < 27 * 12; i++)
+//            printf("%f\n", p[i]);
+    }
+    {
+        ;
+    }
 
 	if (config.coneBeam == true)
 	{
@@ -430,7 +466,7 @@ void mango::FpjClass::SaveSinogram(const char * filename)
 
 void mango::FpjClass::ForwardProjectionBilinear()
 {
-	ForwardProjectionBilinear_Agent(image, sinogram_large,sid_array,sdd_array, offcenter_array, u, v, beta, swing_angle_array, config, 0);
+	ForwardProjectionBilinear_Agent(image, sinogram_large,sid_array,sdd_array, offcenter_array, pmatrix_array, u, v, beta, swing_angle_array, config, 0);
 
 	BinSinogram(sinogram_large, sinogram, config);
 }
@@ -446,7 +482,7 @@ void mango::FpjClass::ForwardProjectionBilinearAndSave(const char* filename)
 			printf("\b\b\b\b\b\b\b");
 		}
 		printf("%3d/%3d", z_idx + 1, config.detZEltCount);
-		ForwardProjectionBilinear_Agent(image, sinogram_large, sid_array, sdd_array, offcenter_array, u, v, beta, swing_angle_array, config, z_idx);
+		ForwardProjectionBilinear_Agent(image, sinogram_large, sid_array, sdd_array, offcenter_array, pmatrix_array, u, v, beta, swing_angle_array, config, z_idx);
 
 		BinSinogram(sinogram_large, sinogram, config);
 

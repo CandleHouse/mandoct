@@ -52,6 +52,11 @@ namespace mango
 		bool	nonuniformOffCenter;		// whether the offcenter distances are nonuniform
 		std::string		offCenterFile;		// file of the offcenter distance array
 
+        bool pmatrixFlag;					// whether the pmatrix is applied
+        std::string pmatrixFile;			// file of the pmatrix
+        float pmatrixDetEltSize = detEltSize;	// physical size of detector element when pmatrix calibration is performed [mm]
+                                                // is the same with delEltSize by DEFAULT
+
 		float	detEltHeight;			// (for cone beam) height of detector element [mm]
 		float	detZoffCenter;			// (for bone beam) the position of the center of the detector in z direction [mm]
 
@@ -78,6 +83,8 @@ namespace mango
 		static float* sid_array;
 		// array of the offcenter distances
 		static float* offcenter_array;
+        // array of pmatrix
+        static float* pmatrix_array;
 		// array of detector element coordinate in Z direction
 		static float* v;
 		// array of detector element coordinate
