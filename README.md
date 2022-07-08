@@ -9,6 +9,13 @@
 ## What are reinforced from Mangoct?
 
 - Now can use one single 'pMatrix.jsonc' file to add offset in projection, and use the same file to do geometrical calibration.
+
+- Now can simply add the following attribute in '*config_mgfbp.jsonc*' to do **Truncated Artifact Correction**.
+
+  ```
+  "TruncatedArtifactCorrection": true,
+  ```
+
 - TODO
 
 ## Coordinate System

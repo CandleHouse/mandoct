@@ -252,6 +252,17 @@ void mango::FbpClass::ReadConfigFile(const char * filename)
 		config.doBeamHardeningCorr = true;
 	}
 
+    if (doc.HasMember("TruncatedArtifactCorrection"))
+    {
+        config.doTruncatedArtifactCorr = doc["TruncatedArtifactCorrection"].GetBool();
+        config.paddingWidth = config.sgmWidth / 10;
+        config.sgmWidth += config.paddingWidth * 2;  // padding sinogram
+
+        printf("--Do Truncated Artifact Correction--\n");
+    }
+    else
+        config.doTruncatedArtifactCorr = false;
+
 	if (doc.HasMember("ConeBeam"))
 		config.coneBeam = doc["ConeBeam"].GetBool();
 	else
@@ -488,7 +499,27 @@ void mango::FbpClass::ReadSinogramFile(const char * filename)
 		exit(3);
 	}
 
-	fread(sinogram, sizeof(float), config.sgmWidth*config.sgmHeight*config.sliceCount, fp);
+	if (config.doTruncatedArtifactCorr) {
+        unsigned N = config.sgmWidth;
+        unsigned V = config.sgmHeight;
+        unsigned pw = config.paddingWidth;
+        float theta = 3.1415926536f / pw;
+
+        for (int slice = 0; slice < config.sliceCount; slice++) {
+            for (int view = 0; view < V; view++) {
+                fread(&sinogram[pw + view * N + slice * N * V], sizeof(float), (N - pw * 2), fp);
+
+                for (int idx = 0; idx < pw; idx++) {
+                    unsigned offset = view * N + slice * N * V;
+                    float decay = 0.5 * cosf(theta * idx) + 0.5;
+                    sinogram[(pw - 1) - idx + offset] = sinogram[pw + idx + offset] * decay;  // L
+                    sinogram[(N - pw) + idx + offset] = sinogram[(N - pw - 1) - idx + offset] * decay;  // R
+                }
+            }
+        }
+    }
+	else
+        fread(sinogram, sizeof(float), config.sgmWidth*config.sgmHeight*config.sliceCount, fp);
 
 	fclose(fp);
 }
@@ -551,9 +582,26 @@ void mango::FbpClass::BackprojectPixelDrivenAndSave(const char* filename)
 		BackprojectPixelDriven_Agent(sinogram_filter, image, sdd_array, sid_array, offcenter_array, pmatrix_array, u, v, beta, config, z_idx);
 
 		cudaDeviceSynchronize();
-		//printf("%f", image[0]);
-		//convert to HU
-		
+
+        // crop image
+        if (config.doTruncatedArtifactCorr)
+        {
+            float halfDetectorWidth = (config.sgmWidth - config.paddingWidth * 2) * config.detEltSize / 2;
+            float L = sqrtf(powf(halfDetectorWidth, 2) + powf(config.sdd, 2));
+            float cropRadius = config.sid / (L / halfDetectorWidth) / config.pixelSize;
+
+            for (int row_idx = 0; row_idx < config.imgDim; row_idx++)
+            {
+                for (int col_idx = 0; col_idx < config.imgDim; col_idx++)
+                {
+                    float distant = (config.imgDim/2 - row_idx)*(config.imgDim/2 - row_idx) + (config.imgDim/2 - col_idx)*(config.imgDim/2 - col_idx);
+                    if (distant > powf(cropRadius, 2))
+                        image[row_idx*config.imgDim + col_idx] = 0;
+                }
+            }
+        }
+
+		// convert to HU
 		if (config.converToHU)
 		{
 			for (int row_idx = 0; row_idx < config.imgDim; row_idx++)

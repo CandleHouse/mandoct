@@ -52,8 +52,10 @@ namespace mango
 		* reconstruction parameters
 		*********************************************************/
 		bool		doBeamHardeningCorr;	// need beam hardening correction or not
+		bool        doTruncatedArtifactCorr;// need truncated artifact correction or not
 		bool		coneBeam = false;		// whether the recon is a bone beam or fan beam
 		float		beamHardening[10] = { 0 };		// beam hardening parameters
+        unsigned    paddingWidth;           // sinogram padding width (number of detector elements)
 
 		unsigned	imgDim;					// number of rows/cols of reconstructed images
 		float		pixelSize;				// image pixel size [mm]
