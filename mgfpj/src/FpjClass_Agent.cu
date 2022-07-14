@@ -285,21 +285,40 @@ __global__ void ForwardProjectionBilinear_pmatrix_device(float* img, float* sgm,
         }
 
 
-        //get the sid and sdd for a given view
-        float sid = sid_array[row];
-        float sdd = sdd_array[row];
+        // get the sid and sdd for a given view
+        float sid = sid_array[row];  // now useless for cone beam and fan beam
+        float sdd = sdd_array[row];  // now useless for cone beam and fan beam
+
+        // pmatrix index and params
+        int pos_in_matrix = 12 * row;
+        float p_14 = pmatrix[pos_in_matrix + 3];
+        float p_24 = pmatrix[pos_in_matrix + 7];
+        float p_34 = pmatrix[pos_in_matrix + 11];
 
         // current source position
-        float xs = sid * cosf(beta[row]);
-        float ys = sid * sinf(beta[row]);
-        float zs = 0;
+        float xs = pmatrix[pos_in_matrix + 0] * -p_14 \
+                 + pmatrix[pos_in_matrix + 1] * -p_24 \
+                 + pmatrix[pos_in_matrix + 2] * -p_34;
 
-        // calculate offcenter bias
-        float offcenter_bias = 0;
+        float ys = pmatrix[pos_in_matrix + 4] * -p_14 \
+                 + pmatrix[pos_in_matrix + 5] * -p_24 \
+                 + pmatrix[pos_in_matrix + 6] * -p_34;
+
+        float zs = pmatrix[pos_in_matrix + 8] * -p_14 \
+                 + pmatrix[pos_in_matrix + 9] * -p_24 \
+                 + pmatrix[pos_in_matrix + 10]* -p_34;
+        // reset SID from source position
+        sid = sqrtf(xs * xs + ys * ys);
 
         // current detector element position
-        float xd = -(sdd - sid) * cosf(beta[row]) + (u[col]+ offcenter_bias) * cosf(beta[row] - PI/2.0f + swing_angle_array[row] /180.0f*PI);
-        float yd = -(sdd - sid) * sinf(beta[row]) + (u[col]+ offcenter_bias) * sinf(beta[row] - PI/2.0f + swing_angle_array[row] / 180.0f*PI);
+        float xd = pmatrix[pos_in_matrix + 0] * (1 * ((col + 0.5f) / float(osSize) - 0.5f) - p_14) \
+                 + pmatrix[pos_in_matrix + 1] * (1 * z_element_begin_idx - p_24) \
+                 + pmatrix[pos_in_matrix + 2] * (1 - p_34);
+
+        float yd = pmatrix[pos_in_matrix + 4] * (1 * ((col + 0.5f) / float(osSize) - 0.5f) - p_14) \
+                 + pmatrix[pos_in_matrix + 5] * (1 * z_element_begin_idx - p_24) \
+                 + pmatrix[pos_in_matrix + 6] * (1 - p_34);
+
         float zd = 0;
 
         // step point region
@@ -344,7 +363,9 @@ __global__ void ForwardProjectionBilinear_pmatrix_device(float* img, float* sgm,
             sgm[row*N + col] = 0;
             if (conebeam)
             {
-                zd = v[slice];
+                zd = pmatrix[pos_in_matrix + 8] * (1 * ((col + 0.5f) / float(osSize) - 0.5f) - p_14) \
+                   + pmatrix[pos_in_matrix + 9] * (1 * slice - p_24) \
+                   + pmatrix[pos_in_matrix + 10]* (1 - p_34);
                 sed = sqrtf((xs - xd)*(xs - xd) + (ys - yd)*(ys - yd) + (zs - zd)*(zs - zd));
             }
 
@@ -353,28 +374,15 @@ __global__ void ForwardProjectionBilinear_pmatrix_device(float* img, float* sgm,
                 // for (float L = L_min; L <= L_max; L+= STEPSIZE*dx)  // <=
             {
                 // ratio of [distance: current position to source] to [distance: source to element]
-                float s = L / sed;  // s=1/m
-
-                // use pmatrix to calculate the corresponding index in the object
-                int pos_in_matrix = 12 * row;
-                float p_14 = pmatrix[pos_in_matrix + 3];
-                float p_24 = pmatrix[pos_in_matrix + 7];
-                float p_34 = pmatrix[pos_in_matrix + 11];
+                float ratio_L_sed = L / sed;
 
                 // get the current point position
-                x = pmatrix[pos_in_matrix + 0] * (s * col / osSize - p_14) \
-                  + pmatrix[pos_in_matrix + 1] * (s * slice - p_24) \
-                  + pmatrix[pos_in_matrix + 2] * (s - p_34);
-
-                y = pmatrix[pos_in_matrix + 4] * (s * col / osSize - p_14) \
-                  + pmatrix[pos_in_matrix + 5] * (s * slice - p_24) \
-                  + pmatrix[pos_in_matrix + 6] * (s - p_34);
+                x = xs + (xd - xs) * ratio_L_sed;
+                y = ys + (yd - ys) * ratio_L_sed;
 
                 if (conebeam)// for cone beam, we need to calculate the z position
                 {
-                    z = pmatrix[pos_in_matrix + 8] * (s * col / osSize - p_14) \
-                      + pmatrix[pos_in_matrix + 9] * (s * slice - p_24) \
-                      + pmatrix[pos_in_matrix + 10]* (s - p_34);
+                    z = zs + (zd - zs) * ratio_L_sed;
                 }
 
                 if (helican_scan)
