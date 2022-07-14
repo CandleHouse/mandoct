@@ -25,6 +25,13 @@ int main(int argc, char* argv[])
 		fs::path inDir(mg::FpjClass::config.inputDir);
 		fs::path outDir(mg::FpjClass::config.outputDir);
 
+        // record time
+        float time;
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+        cudaEventRecord(start);
+
 		for (size_t i = 0; i < mg::FpjClass::config.inputFiles.size(); i++)
 		{
 			printf("    \nForward projection %s ...", mg::FpjClass::config.inputFiles[i].c_str());
@@ -35,6 +42,14 @@ int main(int argc, char* argv[])
 
 			printf("\n->\tSaved to file %s\n", mg::FpjClass::config.outputFiles[i].c_str());
 		}
+
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&time, start, stop);
+        printf("Total cost: %lf ms\n", time);
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+
 	}
 	return 0;
 }
