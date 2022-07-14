@@ -252,7 +252,7 @@ __global__ void InitReconKernel_Hilbert(float* reconKernel, const int N, const f
 // sliceOffcenter: mm
 // sdd: source to detector distance
 // totalScanAngle
-__global__ void WeightSinogram_device(float* sgm, int s_index, const float* u, const int N, const int H, const int V, \
+__global__ void WeightSinogram_device(float* sgm, const float* u, const int N, const int H, const int V, \
 	const int S, const float sliceThickness, const float sliceOffcenter, float* sdd_array, float totalScanAngle, bool shortScan, float *beta_array, float* offcenter_array)
 {
 	int col = threadIdx.x + blockDim.x * blockIdx.x;
@@ -264,7 +264,7 @@ __global__ void WeightSinogram_device(float* sgm, int s_index, const float* u, c
 		float u_actual = u[col] + offcenter_bias;//actual u value due to non uniform offcenter
 
 		float sdd = sdd_array[row];
-		for (int i = s_index; i < s_index+1; i++)
+        for (int i = 0; i < S; i++)
 		{
 			float v = sliceThickness * (i - (float(S) / 2.0f + 0.5)) + sliceOffcenter;
             sgm[row*N + col + i * N*H] *= sdd * sdd / sqrtf((u_actual)*(u_actual)+sdd * sdd + v * v);
@@ -306,7 +306,7 @@ __global__ void WeightSinogram_device(float* sgm, int s_index, const float* u, c
 			{
 				//printf("ERROR!");
 			}
-            for (int i = s_index; i < s_index+1; i++)
+            for (int i = 0; i < S; i++)
 			{
                 sgm[row*N + col + i * N*H] *= weighting;
 			}
@@ -1136,37 +1136,8 @@ void FilterSinogram_Agent(float * sgm, float* sgm_flt, float* reconKernel, float
     }
     // Common attenuation imaging
     else
-    {
-        // nStreams must be the GCD(volumes, slice)'s divisor
-        const int nStreams = config.sliceCount;
-        cudaStream_t streams[nStreams];
-        for (auto & stream : streams)
-            checkCuda(cudaStreamCreate(&stream));
-
-        float *sgm_temp;
-        checkCuda(cudaMalloc((void**)&sgm_temp, config.sgmWidth * config.views * config.sliceCount * sizeof(float)));
-        const int sgmChunkSize = config.sgmWidth * config.views * config.sliceCount / nStreams;
-
-        // asynchronous version 1: loop over {copy, kernel, copy}
-        for(int i=0; i < nStreams; i++)
-        {
-            int sgmOffset = sgmChunkSize * i;
-            checkCuda(cudaMemcpyAsync(&sgm_temp[sgmOffset], &sgm[sgmOffset],
-                                      sgmChunkSize * sizeof(float), cudaMemcpyDeviceToDevice,
-                                      streams[i]));
-
-            WeightSinogram_device << <grid, block, 0, streams[i]>> > (sgm_temp, i, u, config.sgmWidth, config.sgmHeight, config.views, config.sliceCount, \
-                config.sliceThickness, config.sliceOffcenter, sdd_array, config.totalScanAngle, config.shortScan, beta, offcenter_array);
-
-            checkCuda(cudaMemcpyAsync(&sgm[sgmOffset], &sgm_temp[sgmOffset],
-                                      sgmChunkSize * sizeof(float), cudaMemcpyDeviceToDevice,
-                                      streams[i]));
-        }
-
-        cudaFree(sgm_temp);
-        for (auto & stream : streams)
-            checkCuda(cudaStreamDestroy(stream));
-    }
+        WeightSinogram_device << <grid, block >> > (sgm, u, config.sgmWidth, config.sgmHeight, config.views, config.sliceCount, \
+			config.sliceThickness, config.sliceOffcenter, sdd_array, config.totalScanAngle, config.shortScan, beta, offcenter_array);
 
     cudaDeviceSynchronize();
 
