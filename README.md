@@ -39,12 +39,14 @@
     $$
 
     where:
+    
     $$
     DetCenterSide_u=(nu-1) / 2\\
     DetCenterSide_v=(nv-1) / 2\\
     $$
 
   - In order to inverse the direction of u, horizontal inverse the object and inverse the rotate direction:
+    
     $$
     \beta=-\beta\\
     pMatrix = pMatrix\cdot
